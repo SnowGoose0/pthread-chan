@@ -24,11 +24,28 @@ typedef struct {
   File* channel_files;
 } FileData;
 
+typedef struct {
+  int buffer_size;
+  int num_threads;
+  int lock_config;
+  int global_checkpointing;
+
+  char* metadata_file_path;
+  char* output_file_path;
+} ComputeOptions;
+
+typedef struct {
+  FileData* fd;
+  ComputeOptions* op;
+  int offset;
+} ThreadArgs;
+
 float compute_beta(float beta, float sample);
 float compute_alpha(float alpha, float sample, float prev_sample);
 int str_clean(char* src);
-void compute_channels(FileData* fd, const char* output_file_path, int file_index_offset, int read_sz);
 void free_metadata(FileData* fd);
+
+void* compute_channels(void* t_args);
 
 #define ERROR_ARGC                          "Error: Invalid argument count\n"
 #define ERROR_PARSE_INT_ARG                 "Error: Invalid argument integer values\n"
