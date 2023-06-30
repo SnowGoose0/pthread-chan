@@ -1,8 +1,10 @@
 #ifndef LOCK
 #define LOCK
 
-typedef unsigned int Lock;
+#include <stdbool.h>
 
+typedef int Lock; 
 
+bool compare_and_swap(Lock* c_lock, Lock expected, Lock new_val);
 
 #endif

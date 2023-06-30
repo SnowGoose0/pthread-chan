@@ -1,16 +1,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
 #include <unistd.h>
 #include <math.h>
 #include <pthread.h>
 
 #include "myChannels.h"
+#include "lock.h"
 #include "parse.h"
 
-static float* output_entries;
+//static float* output_entries;
 static int output_size;
 
+Lock c_lock;
 void* compute_channels(void* t_args) {
   FILE* f;
   
@@ -24,10 +27,13 @@ void* compute_channels(void* t_args) {
   
   char* read_buffer = (char*) calloc(read_sz + 1, sizeof(char));
 
-  for (int f_index = 0; f_index < file_count_local; ++f_index) {
+  for (int fi = 0; fi < file_count_local; ++fi) {
     int output_index = 0;
-    int f_index = file_index_offset + (f_index * file_count_local);
+    int f_index = file_index_offset + (fi * op->num_threads);
+    
     char* read_path = fd->channel_files[f_index].path;
+    char* write_path = op->output_file_path;
+    
     float prev = -1;
     size_t bytes_read;
 
@@ -36,6 +42,8 @@ void* compute_channels(void* t_args) {
       fprintf(stderr, ERROR_FILE_PATH);
       exit(EXIT_FAILURE);
     }
+
+    /* Read k bytes from file */
   
     while ((bytes_read = fread(read_buffer, sizeof(char), read_sz, f)) > 0) {
       for (int i = 0; i < read_sz; ++i) {
@@ -51,18 +59,70 @@ void* compute_channels(void* t_args) {
       ps_err = parse_int(&parsed, read_buffer);
 
       if (ps_err) continue;
-
-      if (output_index >= output_size) {
-	++output_size;
-	output_entries = (float*) realloc(output_entries, output_size);
-	output_entries[output_size - 1] = 0;
-      }
-
+      
       alpha_res = compute_alpha(fd->channel_files[f_index].alpha, parsed, prev);
       res = compute_beta(fd->channel_files[f_index].beta, alpha_res);
 
       prev = alpha_res;
-      output_entries[output_index++] += res;
+
+      /* Entry Section */
+
+      while (compare_and_swap(&c_lock, 0, 1));
+
+      /* Critical Section */
+
+      printf("Hi from thread %d\n", file_index_offset + 1);
+
+      if (output_index >= output_size) ++output_size;
+      float* output_entries = (float*) calloc(output_size, sizeof(float));
+
+      FILE* f_out = fopen(write_path, "rb");
+      fseek(f_out, 0, SEEK_END);
+      long f_out_size = ftell(f_out);
+      rewind(f_out);
+
+      char* f_out_buffer = (char*) calloc(f_out_size + 1, sizeof(char));
+      fread(f_out_buffer, sizeof(char), f_out_size, f_out);
+      
+      fclose(f_out);
+
+      fclose(fopen(write_path, "w")); /* Empty the original output file */
+      
+      char* tok = strtok(f_out_buffer, "\n");
+      if (tok != NULL) {
+	output_entries[0] = atof(tok);
+      }
+      
+      for (int k = 1; k < output_size; ++k) {
+	char* tok = strtok(NULL, "\n");
+
+	if (tok != NULL) {
+	  output_entries[k] = atof(tok);
+	}
+      }
+      
+      float cur_entry_val = output_entries[output_index];
+      float new_entry_val = cur_entry_val + res;
+      output_entries[output_index] = new_entry_val;
+      ++output_index;
+
+      f_out = fopen(write_path, "a");
+
+      for (int k = 0; k < output_size; ++k) {
+	fprintf(f_out, "%f\n", output_entries[k]);
+      }
+
+      fclose(f_out);
+
+      /* Exit Section */
+
+      c_lock = 0;
+
+      /* Remainder Section */
+
+      free(output_entries);
+      free(f_out_buffer);
+      
       memset(read_buffer, 0, read_sz + 1);
     }
 
@@ -74,9 +134,9 @@ void* compute_channels(void* t_args) {
 
 
 int main(int argc, char** argv) {
-
-  output_entries = (float*) calloc(DEFAULT_OUTPUT_SIZE, sizeof(int));
+  //output_entries = (float*) calloc(DEFAULT_OUTPUT_SIZE, sizeof(int));
   output_size = DEFAULT_OUTPUT_SIZE;
+  c_lock = 0;
   
   if (argc != EXPECTED_ARGC) {
     fprintf(stderr, ERROR_ARGC);
@@ -144,14 +204,18 @@ int main(int argc, char** argv) {
     printf("Beta: %f\n\n", fd->channel_files[i].beta);
   } 
 
+  /*
   printf("\nOUT \n\n");
   for (int i = 0; i < output_size; ++i) {
     printf("%.2f\n", output_entries[i]);
   }
+  */
 
   /*
     Format Output
   */
+
+  /*
 
   int output_offset = 0;
   
@@ -169,8 +233,10 @@ int main(int argc, char** argv) {
   output_content[output_offset] = 0;
   printf("output_content:\n%s\n", output_content);
 
+  */
+
   free_metadata(fd);
-  free(output_entries);
+  // free(output_entries);
   free(op);
 
   exit(EXIT_SUCCESS);

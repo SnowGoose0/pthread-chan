@@ -1,11 +1,8 @@
+#include <stdio.h>
 #include <stdlib.h>
 
 #include "lock.h"
 
-Lock TAS(Lock* l) {
-  Lock ret_l = *l;
-  *l = 1;
-  return ret_l;
+bool compare_and_swap(Lock* c_lock, Lock expected, Lock new_val) {
+  return __sync_bool_compare_and_swap(c_lock, expected, new_val);
 }
-
-

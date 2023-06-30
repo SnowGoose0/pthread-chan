@@ -2,7 +2,7 @@ CC = gcc
 CFLAGS = -g -Wall
 LDFLAGS = -pthread -lm
 
-SRCS = myChannels.c parse.c
+SRCS = myChannels.c parse.c lock.c
 OBJS = $(SRCS:.c=.o)
 
 all: myChannel
