@@ -3,6 +3,11 @@
 
 #include "lock.h"
 
-bool compare_and_swap(Lock* c_lock, Lock expected, Lock new_val) {
-  return __sync_bool_compare_and_swap(c_lock, expected, new_val);
+void lock(Lock* c_lock) {
+  while (__sync_lock_test_and_set(&c_lock, 1))
+    ;
+}
+
+void unlock(Lock* c_lock) {
+  __sync_lock_release(c_lock);
 }

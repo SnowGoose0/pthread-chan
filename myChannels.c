@@ -14,6 +14,9 @@
 static int output_size;
 
 Lock c_lock;
+Lock* c_lock_entries; /* Only used if lock_config == 2 */
+int c_lock_entries_size;
+
 void* compute_channels(void* t_args) {
   FILE* f;
   
@@ -27,7 +30,7 @@ void* compute_channels(void* t_args) {
   
   char* read_buffer = (char*) calloc(read_sz + 1, sizeof(char));
 
-  for (int fi = 0; fi < file_count_local; ++fi) {
+  for (int fi = 0; fi < file_count_local; ++fi) { /* Loop through files assigned */
     int output_index = 0;
     int f_index = file_index_offset + (fi * op->num_threads);
     
@@ -67,56 +70,63 @@ void* compute_channels(void* t_args) {
 
       /* Entry Section */
 
-      while (compare_and_swap(&c_lock, 0, 1));
+      if (op->lock_config == 1) {
+	while(__sync_lock_test_and_set(&c_lock, 1));
+      }
+
+      else if (op->lock_config == 2) {
+	while(__sync_lock_test_and_set(&c_lock_entries[]));
+      }
+
+      else if (op->lock_config == 3) {
+	while(__sync_val_compare_and_swap(&c_lock, 0, 1));
+      }
 
       /* Critical Section */
 
       printf("Hi from thread %d\n", file_index_offset + 1);
-
-      if (output_index >= output_size) ++output_size;
-      float* output_entries = (float*) calloc(output_size, sizeof(float));
-
-      FILE* f_out = fopen(write_path, "rb");
-      fseek(f_out, 0, SEEK_END);
-      long f_out_size = ftell(f_out);
-      rewind(f_out);
-
-      char* f_out_buffer = (char*) calloc(f_out_size + 1, sizeof(char));
-      fread(f_out_buffer, sizeof(char), f_out_size, f_out);
       
-      fclose(f_out);
+      float* output_entries = (float*) calloc(output_size, sizeof(float));      
 
+      char* f_out_buffer = ftos(write_path);
       fclose(fopen(write_path, "w")); /* Empty the original output file */
       
       char* tok = strtok(f_out_buffer, "\n");
       if (tok != NULL) {
 	output_entries[0] = atof(tok);
-      }
-      
-      for (int k = 1; k < output_size; ++k) {
-	char* tok = strtok(NULL, "\n");
+	for (int k = 1; k < output_size; ++k) {
+	  char* tok = strtok(NULL, "\n");
 
-	if (tok != NULL) {
-	  output_entries[k] = atof(tok);
+	  if (tok != NULL) {
+	    output_entries[k] = atof(tok);
+	  }
 	}
       }
       
       float cur_entry_val = output_entries[output_index];
       float new_entry_val = cur_entry_val + res;
       output_entries[output_index] = new_entry_val;
+
+      FILE* f_out = fopen(write_path, "a");
+
+      for (int k = 0; k < output_size; ++k) fprintf(f_out, "%f\n", output_entries[k]);
+      fclose(f_out);
+
       ++output_index;
 
-      f_out = fopen(write_path, "a");
+      if (output_index >= output_size) {
+	++output_size;
+	++c_lock_entries_size;
 
-      for (int k = 0; k < output_size; ++k) {
-	fprintf(f_out, "%f\n", output_entries[k]);
+	c_lock_entries = (Lock*) realloc(c_lock_entries, c_lock_entries_size);
+	c_lock_entries[output_index] = 0;
       }
-
-      fclose(f_out);
 
       /* Exit Section */
 
-      c_lock = 0;
+      if (op->lock_config == 1 || op->lock_config == 3) {
+	__sync_lock_release(&c_lock);
+      }
 
       /* Remainder Section */
 
@@ -128,14 +138,16 @@ void* compute_channels(void* t_args) {
 
     fclose(f);
   }
+
+  free(read_buffer);
   
   return NULL;
 }
 
-
 int main(int argc, char** argv) {
   //output_entries = (float*) calloc(DEFAULT_OUTPUT_SIZE, sizeof(int));
-  output_size = DEFAULT_OUTPUT_SIZE;
+  output_size = 1;
+  c_lock_entries_size = 1; 
   c_lock = 0;
   
   if (argc != EXPECTED_ARGC) {
@@ -158,6 +170,8 @@ int main(int argc, char** argv) {
  
   char* mfp = *(argv + 3);
   char* ofp = *(argv + 6);
+
+  if (lc == 2) c_lock_entries = (Lock*) calloc(1, sizeof(Lock));
   
   ComputeOptions* op = (ComputeOptions*) malloc(sizeof(ComputeOptions));
   
@@ -167,6 +181,8 @@ int main(int argc, char** argv) {
   op->global_checkpointing = gcp;
   op->metadata_file_path = mfp;
   op->output_file_path = ofp;
+
+  fclose(fopen(ofp, "w"));
   
   char* output_content = (char*) calloc(1, sizeof(char));
   
@@ -234,10 +250,16 @@ int main(int argc, char** argv) {
   printf("output_content:\n%s\n", output_content);
 
   */
-
+  
   free_metadata(fd);
-  // free(output_entries);
+  free(output_content);
+  free(t_args);
+  free(t_ids);
+
+  if (op->lock_config == 2) free(c_lock_entries); 
+  
   free(op);
+  // free(output_entries);
 
   exit(EXIT_SUCCESS);
 }
@@ -246,6 +268,20 @@ int main(int argc, char** argv) {
 /* =======================================================================================
    =======================================================================================
    ==================================================================================== */
+
+char* ftos(char* path) {
+  FILE* f = fopen(path, "rb");
+  fseek(f, 0, SEEK_END);
+  long fsz = ftell(f);
+  rewind(f);
+
+  char* f_buffer = (char*) calloc(fsz + 1, sizeof(char));
+  fread(f_buffer, sizeof(char), fsz, f);
+
+  fclose(f);
+  
+  return f_buffer;
+}
 
 float compute_beta(float beta, float sample) {
   return sample * beta;

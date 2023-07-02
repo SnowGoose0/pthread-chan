@@ -42,6 +42,7 @@ typedef struct {
 
 float compute_beta(float beta, float sample);
 float compute_alpha(float alpha, float sample, float prev_sample);
+char* ftos(char* path);
 int str_clean(char* src);
 void free_metadata(FileData* fd);
 
