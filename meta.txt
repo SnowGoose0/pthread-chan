@@ -1,6 +1,6 @@
 2
 input1.txt
-1
+0.5
 1
 input2.txt
 0.5
