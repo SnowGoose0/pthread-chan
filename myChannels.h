@@ -45,6 +45,7 @@ float compute_alpha(float alpha, float sample, float prev_sample);
 char* ftos(char* path);
 int str_clean(char* src);
 void free_metadata(FileData* fd);
+void mem_free(void* ptr);
 
 void* compute_channels(void* t_args);
 

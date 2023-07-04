@@ -11,16 +11,19 @@
 #include "parse.h"
 
 //static float* output_entries;
-static int output_size;
-static float* output_entries;
+static int OUTPUT_SIZE;
+static float* OUTPUT_ENTRIES;
 
-Lock c_lock;
-Lock* c_lock_entries; /* Only used if lock_config == 2 */
-int c_lock_entries_size;
+Lock C_LOCK;
+Lock* C_LOCK_ENTRIES; /* Only used if lock_config == 2 */
+int C_LOCK_ENTRIES_SIZE;
 
-void* compute_channels(void* t_args) {
-  FILE* f;
-  
+typedef struct{
+  FILE* file_desc;
+  int fi;
+} OpenFiles;
+
+void* compute_channels(void* t_args) {  
   ThreadArgs* args = (ThreadArgs*) t_args;
   FileData* fd = args->fd;
   ComputeOptions* op = args->op;
@@ -28,90 +31,126 @@ void* compute_channels(void* t_args) {
   int file_index_offset = args->offset;
   int file_count_local = fd->channel_file_size / op->num_threads;
   int read_sz = op->buffer_size;
-  
-  char* read_buffer = (char*) calloc(read_sz + 1, sizeof(char));
+  int file_finished_count = 0;
 
-  for (int fi = 0; fi < file_count_local; ++fi) { /* Loop through files assigned */
-    int output_index = 0;
-    int f_index = file_index_offset + (fi * op->num_threads);
-    
+  OpenFiles* open_files_buffer = (OpenFiles*) calloc(file_count_local, sizeof(OpenFiles));
+  char* read_buffer = (char*) calloc(read_sz + 1, sizeof(char));
+  int* output_index_buffer = (int*) calloc(file_count_local, sizeof(int));
+  float* prev_buffer = (float*) calloc(file_count_local, sizeof(float));
+
+  //memset(prev_buffer, 0, file_count_local);
+
+  for (int i = 0; i < file_count_local; i++) prev_buffer[i] = -1;
+
+  /* Open all files */
+  for (int j = 0; j < file_count_local; ++j) {
+    int f_index = file_index_offset + (j * op->num_threads);
     char* read_path = fd->channel_files[f_index].path;
     
-    float prev = -1;
-    size_t bytes_read;
-
-    f = fopen(read_path, "rb");
-    if (f == NULL) {
-      fprintf(stderr, ERROR_FILE_PATH);
-      exit(EXIT_FAILURE);
-    }
-
-    while ((bytes_read = fread(read_buffer, sizeof(char), read_sz, f)) > 0) {
-      /*for (int i = 0; i < read_sz; ++i) {
-	if (read_buffer[i] == '\n') printf("\\n");
-	else printf("%c", read_buffer[i]);
-      }
-      printf("\n"); */
-    
-      int parsed, ps_err;
-      float res, alpha_res;
-    
-      str_clean(read_buffer);
-      ps_err = parse_int(&parsed, read_buffer);
-
-      if (ps_err) continue;
-      
-      alpha_res = compute_alpha(fd->channel_files[f_index].alpha, parsed, prev);
-      prev = alpha_res;
-      res = compute_beta(fd->channel_files[f_index].beta, alpha_res);
-
-      /* Entry Section */
-      if (op->lock_config == 1) {
-	while(__sync_lock_test_and_set(&c_lock, 1));
-      }
-
-      else if (op->lock_config == 2) {
-	while(__sync_lock_test_and_set(&c_lock_entries[output_index], 1));
-      }
-
-      else if (op->lock_config == 3) {
-	while(__sync_val_compare_and_swap(&c_lock, 0, 1));
-      }
-
-      /* Critical Section */
-      printf("Thread#%d - Iteration %d\n", file_index_offset + 1, output_index);
-
-      if (output_index >= output_size) {
-	++output_size;
-	++c_lock_entries_size;
-
-	output_entries = (float*) realloc(output_entries, output_size);
-	output_entries[output_index] = 0;
-
-	if (op->lock_config == 2) {
-	  c_lock_entries = (Lock*) realloc(c_lock_entries, c_lock_entries_size);
-	  c_lock_entries[output_index] = 0;
-	}
-      }
-      
-      float cur_entry_val = output_entries[output_index];
-      float new_entry_val = cur_entry_val + res;
-      output_entries[output_index] = new_entry_val;
-
-      /* Exit Section */
-      Lock* lock_ptr = &c_lock;
-
-      if (op->lock_config == 2) lock_ptr = &c_lock_entries[output_index];
-      
-      __sync_lock_release(lock_ptr);
-
-      /* Remainder Section */
-      memset(read_buffer, 0, read_sz + 1);
-      ++output_index;
-    }
-
-    fclose(f);
+    open_files_buffer[j].file_desc = fopen(read_path, "rb");
+    open_files_buffer[j].fi = f_index;
   }
+
+  // for (int fi = 0; fi < file_count_local; ++fi) { /* Loop through files 
+  /* int output_index = 0; */
+    /* int f_index = file_index_offset + (fi * op->num_threads); */
+    
+    /* char* read_path = fd->channel_files[f_index].path; */
+    
+    /* float prev = -1; */
+    /* size_t bytes_read; */
+
+    /* f = fopen(read_path, "rb"); */
+    /* if (f == NULL) { */
+    /*   fprintf(stderr, ERROR_FILE_PATH); */
+    /*   exit(EXIT_FAILURE); */
+    /* } */
+
+  printf("file_count_local: %d\n", file_count_local);
+
+  for (int i = 0; file_finished_count < file_count_local; i = (i + 1) % file_count_local) {
+    FILE* f = open_files_buffer[i].file_desc;
+    
+    if (f == NULL) continue; /* Any finished file will be set to NULL */
+
+    size_t bytes_read = fread(read_buffer, sizeof(char), read_sz, f);
+    int output_index = output_index_buffer[i];
+    int f_index = open_files_buffer[i].fi;
+
+  //         for (int i = 0; i < read_sz; ++i) {
+	// if (read_buffer[i] == '\n') printf("\\n");
+	// else printf("%c", read_buffer[i]);
+  //     }
+  //     printf("\n"); 
+
+    if (bytes_read == 0) {
+      ++file_finished_count;
+      
+      fclose(f);
+      open_files_buffer[i].file_desc = NULL;
+      
+      continue;
+    }
+    
+    int parsed, ps_err;
+    float res, alpha_res;
+    
+    str_clean(read_buffer);
+    ps_err = parse_int(&parsed, read_buffer);
+
+    if (ps_err) continue;
+      
+    alpha_res = compute_alpha(fd->channel_files[f_index].alpha, parsed, prev_buffer[i]);
+    prev_buffer[i] = alpha_res;
+    res = compute_beta(fd->channel_files[f_index].beta, alpha_res);
+
+    /* Entry Section */
+    if (op->lock_config == 1) {
+      while(__sync_lock_test_and_set(&C_LOCK, 1));
+    }
+
+    else if (op->lock_config == 2) {
+      while(__sync_lock_test_and_set(&C_LOCK_ENTRIES[output_index], 1));
+    }
+
+    else if (op->lock_config == 3) {
+      while(__sync_val_compare_and_swap(&C_LOCK, 0, 1));
+    }
+
+    /* Critical Section */
+    printf("Thread#%d - Iteration %d - Res %f\n", file_index_offset + 1, output_index, res);
+
+    if (output_index >= OUTPUT_SIZE) {
+      ++OUTPUT_SIZE;
+      ++C_LOCK_ENTRIES_SIZE;
+
+      OUTPUT_ENTRIES = (float*) realloc(OUTPUT_ENTRIES, OUTPUT_SIZE);
+      OUTPUT_ENTRIES[output_index] = 0;
+
+      if (op->lock_config == 2) {
+	C_LOCK_ENTRIES = (Lock*) realloc(C_LOCK_ENTRIES, C_LOCK_ENTRIES_SIZE);
+	C_LOCK_ENTRIES[output_index] = 0;
+      }
+    }
+      
+    float cur_entry_val = OUTPUT_ENTRIES[output_index];
+    float new_entry_val = cur_entry_val + res;
+    OUTPUT_ENTRIES[output_index] = new_entry_val;
+
+    /* Exit Section */
+    Lock* lock_ptr = &C_LOCK;
+
+    if (op->lock_config == 2) lock_ptr = &C_LOCK_ENTRIES[output_index];
+      
+    __sync_lock_release(lock_ptr);
+
+    /* Remainder Section */
+    memset(read_buffer, 0, read_sz + 1);
+    ++output_index_buffer[i];
+  }
+  /*
+    fclose(f);
+    } */
 
   free(read_buffer);
   
@@ -120,10 +159,10 @@ void* compute_channels(void* t_args) {
 
 int main(int argc, char** argv) {
   //output_entries = (float*) calloc(DEFAULT_OUTPUT_SIZE, sizeof(int));
-  output_size = 1;
-  output_entries = (float*) calloc(output_size, sizeof(float));
-  c_lock_entries_size = 1; 
-  c_lock = 0;
+  OUTPUT_SIZE = 1;
+  OUTPUT_ENTRIES = (float*) calloc(OUTPUT_SIZE, sizeof(float));
+  C_LOCK_ENTRIES_SIZE = 1; 
+  C_LOCK = 0;
   
   if (argc != EXPECTED_ARGC) {
     fprintf(stderr, ERROR_ARGC);
@@ -146,7 +185,7 @@ int main(int argc, char** argv) {
   char* mfp = *(argv + 3);
   char* ofp = *(argv + 6);
 
-  if (lc == 2) c_lock_entries = (Lock*) calloc(1, sizeof(Lock));
+  if (lc == 2) C_LOCK_ENTRIES = (Lock*) calloc(1, sizeof(Lock));
   
   ComputeOptions* op = (ComputeOptions*) malloc(sizeof(ComputeOptions));
   
@@ -203,8 +242,8 @@ int main(int argc, char** argv) {
   /* Format Output */
   int output_offset = 0;
   
-  for (int out_i = 0; out_i < output_size; ++out_i) {
-    int out_entry = (int) ceil(output_entries[out_i]);
+  for (int out_i = 0; out_i < OUTPUT_SIZE; ++out_i) {
+    int out_entry = (int) ceil(OUTPUT_ENTRIES[out_i]);
     int out_entry_len = parse_int_digit(out_entry);
 
     output_content = (char*) realloc((char*) output_content,
@@ -218,13 +257,15 @@ int main(int argc, char** argv) {
   fputs(output_content, fopen("out.txt", "w+")); /* Dump */
   printf("output_content:\n%s\n", output_content);
 
+  
+
   /* Memory Management */
   free_metadata(fd);
-  free(output_content);
-  free(t_args);
-  free(t_ids);
+  mem_free(output_content);
+  mem_free(t_args);
+  mem_free(t_ids);
 
-  if (op->lock_config == 2) free(c_lock_entries); 
+  if (op->lock_config == 2) free(C_LOCK_ENTRIES); 
   
   free(op);
   // free(output_entries);
@@ -286,11 +327,16 @@ int str_clean(char* src) {
 void free_metadata(FileData* fd) {
   int f = 0;
   for (; f < fd->channel_file_size; ++f) {
-    free(fd->channel_files[f].path);
-    fd->channel_files[f].path = NULL;
+    mem_free(fd->channel_files[f].path);
   }
   
-  free(fd->channel_files);
-  free(fd);
-  fd = NULL;
+  mem_free(fd->channel_files);
+  mem_free(fd);
+}
+
+void mem_free(void* ptr) {
+  if (ptr != NULL) {
+    free(ptr);
+    ptr = NULL;
+  }
 }
