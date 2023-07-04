@@ -1,0 +1,46 @@
+This document will attempt the explain the design choices for this program.
+
+
+Task Distribution:
+
+The number of tasks each thread takes on is evenly distributed (as per assignment assumptions). Each thread T(i) in {T(1), T(2)... T(n)} takes on task (i - 1) + c * num_threads, where c is some positive integer. For example, suppose there are 6 tasks and 2 threads, thread 1 will take on task 0, task 2, and task 4.
+
+Each thread will start at the function: compute_channels()
+
+
+Reading Input:
+
+Each thread will read exactly k = buffer_size bytes from the input file per iteration. To account for Windows .txt formating, the thread may read 1 additional byte to a separate buffer depending on whether the '\r' character appears in the original read. This allows the program to account the "\r\n" sequence as one byte which provides consistent results for Unix .txt files. However, the default reading behaviour assumes the use of Unix .txt files where '\n' is the only indicator of a new line.
+
+
+Shared Variables:
+
+There exists two main variables that are shared among all threads: output_entries, output_size
+
+output_entries: A shared array of floats that stores each entry of the output file. The output of entry computed by a thread (per read iteration) will be stored here by indexing into the array and incrementing the previous value at that location.
+
+output_size: Number of entries in total. The value is expected to grow if any thread attempts to index into output_entries where the index is greater or equal to output_size.
+
+The variables output_entries is initialized to a pointer to an array of floats of size 1. Correspondingly, output_size is initialized to the value of 1. Since the number of entries is unknown prior to calculations, the size of output_entries will grow as needed: when a thread attempts to index a location beyond its current size (index >= output_size). 
+
+
+Lock Configuration:
+
+lock_config = 0: A shared variable c_lock is used as the main lock for the entire output channel. TestAndSet is the mechanism that is used for this spinlock. The __sync_lock_test_and_set() function provided by GCC is the implementation used for the mechanism.
+
+lock_config = 1: A spinlock via. TestAndSet mechanism is also used for this configuration similar to the prior. However, the locks are stored in a shared variable c_lock_entries which has a lock corresponding to an entry in output_entries via common index. For example, the c_lock_entries[1] is a lock for the second entry (output_entries[1]). Similar to output_entries, c_lock_entries will grow as needed when new entries get added and c_lock_entries_size is used to track the size of the structure.
+
+lock_config = 2: The __sync_val_compare_and_swap() function provided by GCC is used as the CompareAndSwap mechanism of this configuration.
+
+The __sync_lock_release() function provided by GCC is used to reset the lock value to 0 (For any aforementioned configurations).
+
+Built in GCC functions are used to ensure the atomicity of all lock operations.
+
+
+Global Checkpointing: 
+
+
+Output:
+
+Once all thread computations are finished, the values in output_entries are rounded, parsed, and formatted into a buffer which is then dumped into an output .txt file.
+
