@@ -40,17 +40,23 @@ typedef struct {
   int offset;
 } ThreadArgs;
 
+typedef struct{
+  FILE* file_desc;
+  int fi;
+} OpenFiles;
+
 float compute_beta(float beta, float sample);
 float compute_alpha(float alpha, float sample, float prev_sample);
+int check_option_validity(const ComputeOptions* op, const FileData* fd);
 char* ftos(char* path);
 int str_clean(char* src);
-void free_metadata(FileData* fd);
+void mem_free_metadata(FileData* fd);
 void mem_free(void* ptr);
 
 void* compute_channels(void* t_args);
 
-#define ERROR_ARGC                          "Error: Invalid argument count\n"
-#define ERROR_PARSE_INT_ARG                 "Error: Invalid argument integer values\n"
-#define ERROR_FILE_PATH                     "Error: Invalid file path\n"
+#define ERROR_ARGC                          "Error: invalid argument count\n"
+#define ERROR_PARSE_INT_ARG                 "Error: invalid argument integer values\n"
+#define ERROR_FILE_PATH                     "Error: invalid file path\n"
 
 #endif

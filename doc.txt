@@ -1,44 +1,105 @@
 This document will attempt the explain the design choices for this program.
 
+====================================================================================================
 
-Task Distribution:
+<Program Assumptions>
+
+	- The provided text files will not consist any unexpected signatures or '/r' characters
+	- The following actions will result in an error message and the program's termination:
+	  - Too few arguments
+	  - Too many arguments
+	  - Non-divisibility between the number of files and threads
+	  - Buffer size is zero or less
+	  - Number of threads is zero
+	  - Number of files is zero
+	  - Incorrect options for lock configuration and global checkpointing
+	  - Non-existent/invalid file paths (of metafile or any file listed in the metafile)
+	
+====================================================================================================
+
+<Task Distribution>
 
 The number of tasks each thread takes on is evenly distributed (as per assignment assumptions). Each thread T(i) in {T(1), T(2)... T(n)} takes on task (i - 1) + c * num_threads, where c is some positive integer. For example, suppose there are 6 tasks and 2 threads, thread 1 will take on task 0, task 2, and task 4.
 
+    T(1) -> task 0
+    T(2) -> task 1
+    T(1) -> task 2
+    T(2) -> task 3
+    T(1) -> task 4
+    T(1) -> task 5
+
 Each thread will start at the function: compute_channels()
 
+====================================================================================================
 
-Reading Input:
+<Reading Input>
 
-Each thread will read exactly k = buffer_size bytes from the input file per iteration. To account for Windows .txt formating, the thread may read 1 additional byte to a separate buffer depending on whether the '\r' character appears in the original read. This allows the program to account the "\r\n" sequence as one byte which provides consistent results for Unix .txt files. However, the default reading behaviour assumes the use of Unix .txt files where '\n' is the only indicator of a new line.
+Each thread will read exactly k = buffer_size bytes from the input file per iteration. As stated previously, the program will not account for files that contain '\r\n' as the next-line indicator. The program will produce different results if the files contain '\r\n' instead of '\n'.
 
+More details about file reading per thread will be discussed in the checkpointing section.
 
-Shared Variables:
+====================================================================================================
 
-There exists two main variables that are shared among all threads: output_entries, output_size
+<Shared Variables>
 
-output_entries: A shared array of floats that stores each entry of the output file. The output of entry computed by a thread (per read iteration) will be stored here by indexing into the array and incrementing the previous value at that location.
+There exists two main variables that are shared to be written to among all threads: output_entries, output_size
 
-output_size: Number of entries in total. The value is expected to grow if any thread attempts to index into output_entries where the index is greater or equal to output_size.
+output_entries:
+A shared array of floats that stores each entry of the output file. The output of entry computed by a thread (per read iteration) will be stored here by indexing into the array and incrementing the previous value at that location.
+
+output_size:
+Number of entries in total. The value is expected to grow if any thread attempts to index into output_entries where the index is greater or equal to output_size.
 
 The variables output_entries is initialized to a pointer to an array of floats of size 1. Correspondingly, output_size is initialized to the value of 1. Since the number of entries is unknown prior to calculations, the size of output_entries will grow as needed: when a thread attempts to index a location beyond its current size (index >= output_size). 
 
+====================================================================================================
 
-Lock Configuration:
+<Lock Configuration>
 
-lock_config = 0: A shared variable c_lock is used as the main lock for the entire output channel. TestAndSet is the mechanism that is used for this spinlock. The __sync_lock_test_and_set() function provided by GCC is the implementation used for the mechanism.
+lock_config = 0:
+A shared variable c_lock is used as the main lock for the entire output channel. TestAndSet is the mechanism that is used for this spinlock. The __sync_lock_test_and_set() function provided by GCC is the implementation used for the mechanism.
 
-lock_config = 1: A spinlock via. TestAndSet mechanism is also used for this configuration similar to the prior. However, the locks are stored in a shared variable c_lock_entries which has a lock corresponding to an entry in output_entries via common index. For example, the c_lock_entries[1] is a lock for the second entry (output_entries[1]). Similar to output_entries, c_lock_entries will grow as needed when new entries get added and c_lock_entries_size is used to track the size of the structure.
+lock_config = 1:
+A spinlock via. TestAndSet mechanism is also used for this configuration similar to the prior. However, the locks are stored in a shared variable c_lock_entries which has a lock corresponding to an entry in output_entries via common index. For example, the c_lock_entries[1] is a lock for the second entry (output_entries[1]). Similar to output_entries, c_lock_entries will grow as needed when new entries get added and c_lock_entries_size is used to track the size of the structure.
 
-lock_config = 2: The __sync_val_compare_and_swap() function provided by GCC is used as the CompareAndSwap mechanism of this configuration.
+lock_config = 2:
+The __sync_val_compare_and_swap() function provided by GCC is used as the CompareAndSwap mechanism of this configuration.
 
 The __sync_lock_release() function provided by GCC is used to reset the lock value to 0 (For any aforementioned configurations).
 
 Built in GCC functions are used to ensure the atomicity of all lock operations.
 
+====================================================================================================
 
-Global Checkpointing: 
+<Checkpointing>
 
+local:
+The thread will constantly cycle through all files (that it is in charge of) and read k bytes at a time. In a while loop, the thread will read one file and then switch to the next file in rotation. The while loop is terminated once all files are finished.
+
+Example: Suppose thread T is working on files A, B, C, and k = 3 bytes. Then the reading procedure would look something like this as follows:
+
+	 loop       bytes
+	 --------------------------
+	 it0  - read (0 - 2) from A
+	 it1  - read (0 - 2) from B
+	 it2  - read (0 - 2) from C
+	 it3  - read (3 - 5) from A
+	 it4  - read (3 - 5) from B
+	 it5  - read (3 - 5) from C
+	 it6  - read (6 - 8) from A
+	 .    	.
+	 .	.
+	 .	.
+	 --------------------------
+
+This ensures that, for example: A does not read its next k bytes before B and C read its current k bytes.
+
+global:
+Similar to local, files will still be read in a circular manner within each thread. However, a barrier is placed for a thread after each read cycle, preventing it to move onto the next. The barrier will only be unlocked once all threads have completed the current cycle, which then allow all threads to commence to the next cycle. 
+
+
+
+====================================================================================================
 
 Output:
 
