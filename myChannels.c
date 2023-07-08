@@ -7,6 +7,8 @@
 #include <math.h>
 #include <pthread.h>
 
+#include "pthread_barrier.h"
+
 #include "myChannels.h"
 #include "lock.h"
 #include "parse.h"
@@ -68,7 +70,7 @@ void* compute_channels(void* t_args) {
       break;
     }
 
-    if (op->global_checkpointing) __sync_val_compare_and_swap(&A_FLAG, thread_count, 0);
+    if (op->global_checkpointing) __sync_val_compare_and_swap((int*) &A_FLAG, thread_count, 0);
     
     if (f == NULL) continue; /* Any finished file will be set to NULL */
 
@@ -81,7 +83,7 @@ void* compute_channels(void* t_args) {
 	// if (read_buffer[i] == '\n') printf("\\n");
 	// else printf("%c", read_buffer[i]);
   //     }
-  //     printf("\n"); 
+  //     printf("\n");
 
     if (bytes_read == 0) {
       ++file_finished_count;
@@ -105,7 +107,10 @@ void* compute_channels(void* t_args) {
     str_clean(read_buffer);
     ps_err = parse_int(&parsed, read_buffer);
 
-    if (ps_err) continue;
+    if (ps_err) {
+      printf("PS ERR");
+      continue;
+    }
       
     alpha_res = compute_alpha(fd->channel_files[f_index].alpha, parsed, prev_buffer[i]);
     prev_buffer[i] = alpha_res;
@@ -208,8 +213,8 @@ int main(int argc, char** argv) {
 
   if (parse_status > 0) {
     fprintf(stderr, ERROR_PARSE_INT_ARG);
-    e_status = EXIT_FAILURE;
-    goto EXIT;
+    free(OUTPUT_ENTRIES);
+    exit(EXIT_FAILURE);
   }
  
   char* mfp = *(argv + 3);
@@ -233,6 +238,11 @@ int main(int argc, char** argv) {
   ThreadArgs* t_args = (ThreadArgs*) malloc(sizeof(ThreadArgs) * nt);
   pthread_t* t_ids = (pthread_t*) malloc(sizeof(pthread_t) * nt);
 
+  if (fd == NULL) {
+    e_status = EXIT_FAILURE;
+    goto EXIT;
+  }
+
   int error_count;
   if ((error_count = check_option_validity(op, fd)) > 0) {
     fprintf(stderr, "Total number of errors: %d\n", error_count);
@@ -240,10 +250,18 @@ int main(int argc, char** argv) {
     goto EXIT;
   }
 
+  for (int i = 0; i < fd->channel_file_size; i++) {
+    if (access(fd->channel_files[i].path, F_OK)) {
+      fprintf(stderr, "Error: metadata file contains one or more invalid input file paths\n");
+      goto EXIT;
+    }
+  }
+
   if (gcp == 1) pthread_barrier_init(&G_CHECKPOINT, NULL, nt);
  
   /* Spawn Threads */
   for (int i = 0; i < nt; ++i) {
+    printf("HELLO\n");
     t_args[i].fd = fd;
     t_args[i].op = op;
     t_args[i].offset = i;
@@ -289,8 +307,9 @@ int main(int argc, char** argv) {
   mem_free(output_content);
   mem_free(t_args);
   mem_free(t_ids);
-
-  if (op->global_checkpointing == 1 && e_status != EXIT_FAILURE) pthread_barrier_destroy(&G_CHECKPOINT);
+  
+  if (op != NULL)
+    if (op->global_checkpointing == 1 && e_status != EXIT_FAILURE) pthread_barrier_destroy(&G_CHECKPOINT);
   
   mem_free(op);
   mem_free(C_LOCK_ENTRIES);
@@ -302,7 +321,7 @@ int main(int argc, char** argv) {
 
 /* =======================================================================================
    =======================================================================================
-   ==================================================================================== */
+   ======================================================================================= */
 
 int check_option_validity(const ComputeOptions* op, const FileData* fd) {
   int violation_count = 0;

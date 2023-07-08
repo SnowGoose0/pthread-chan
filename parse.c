@@ -39,7 +39,11 @@ FileData* parse_metadata(char* metadata_file_path) {
   FileData* fd = (FileData*) malloc(sizeof(FileData));
   FILE* f = fopen(metadata_file_path, "r");
 
-  if (f == NULL) return NULL;
+  if (f == NULL) {
+    free(fd);
+    fprintf(stderr, "Error: invalid metadata file path\n");
+    return NULL;
+  }
 
   fseek(f, 0, SEEK_END);
   long fs = ftell(f);
@@ -57,6 +61,15 @@ FileData* parse_metadata(char* metadata_file_path) {
   fd->channel_file_size = atoi(tok);
   fd->channel_files = (File*) malloc(sizeof(File) * fd->channel_file_size);
   tok = strtok(NULL, TOK_DELIMITER);
+
+  if (tok == NULL) {
+    free(fd->channel_files);
+    free(fd);
+    free(meta_buffer);
+    fprintf(stderr, "Error: invalid contents in metadata file\n");
+
+    return NULL;
+  }
   
   while (tok != NULL && cur_file < fd->channel_file_size) {
 
@@ -72,6 +85,7 @@ FileData* parse_metadata(char* metadata_file_path) {
       
     } else {
       float val = atof(tok);
+      
       if (parse_state == STATE_ALPHA) {
 	fd->channel_files[cur_file].alpha = val;
       }
@@ -80,7 +94,6 @@ FileData* parse_metadata(char* metadata_file_path) {
 	fd->channel_files[cur_file].beta = val;
 	++cur_file;
       }
-
     }
     
     parse_state = (parse_state + 1) % STATE_COUNT;
