@@ -95,13 +95,30 @@ Example: Suppose thread T is working on files A, B, C, and k = 3 bytes. Then the
 This ensures that, for example: A does not read its next k bytes before B and C read its current k bytes.
 
 global:
-Similar to local, files will still be read in a circular manner within each thread. However, a barrier is placed for a thread after each read cycle, preventing it to move onto the next. The barrier will only be unlocked once all threads have completed the current cycle, which then allow all threads to commence to the next cycle. 
+Similar to local, files will still be read in a circular manner within each thread. However, a checkpoint is placed for a thread after each read cycle, preventing it to move onto the next. The checkpoint will only be unlocked once all threads have completed the current cycle, which then allow all threads to commence to the next cycle.
 
+The checkpoint in each thread is implemented using pthread barriers. The barrier is initialized with the n = (number of threads). Thus, all threads will only commence from the checkpoint if all n threads arrive at the barrier.
 
+If a thread T finishes processing its files before other threads, T will still continue its cycle (by doing no work) instead of exiting early in order to participate in the barrier. Otherwise, the threads that are still processing will hang forever since all threads are required to reach the barrier for them to move forward.
+
+G_FLAG is a variable used to track the number of threads who are done processing (non-working threads). When the value of G_FLAG equals the number of threads, all threads will exit the barrier loop and terminate. Suppose the last working thread just finished and updated the value of G_FLAG (now the exiting condition is satisfied), there may be some non-working thread that could potentially be exit early as it has not reached the next barrier yet, which will leave the threads at the barrier hang. Thus, A_FLAG is a variable that is used to track the number of threads who reached the barrier, so that the last working thread will ONLY update G_FLAG once it knows all other threads are waiting at the barrier. Hence, no race condition on G_FLAG and uniform exits.
+
+Ex. Exiting early
+
+time=0	  [Last Working T]			[Non Working T]
+	  Previous Barrier                  	Previous Barrier
+	  ...
+	  G_FLAG++ // now equals num_threads	...
+	  ...					if (G_FLAG == num_threads)
+	                                           break & exit
+
+					    	...
+time=n    Next Barrier		            	Next Barrier
+
+We want the non working T to reach the Next Barrier before the last working T to update G_FLAG
 
 ====================================================================================================
 
 Output:
 
-Once all thread computations are finished, the values in output_entries are rounded, parsed, and formatted into a buffer which is then dumped into an output .txt file.
-
+Once all thread computations are finished, the values in output_entries are rounded, parsed, and formatted into a buffer which is then dumped into the provided path for the output .txt file.

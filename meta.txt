@@ -1,4 +1,4 @@
-4
+6
 /home/jason/Desktop/cmpt300/cmpt300-a3/input1.txt
 0.5
 1
@@ -11,3 +11,9 @@
 /home/jason/Desktop/cmpt300/cmpt300-a3/input4.txt
 0.5
 0.3
+/home/jason/Desktop/cmpt300/cmpt300-a3/input5.txt
+0.5
+1
+/home/jason/Desktop/cmpt300/cmpt300-a3/input6.txt
+0.5
+0.5

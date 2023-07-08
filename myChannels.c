@@ -16,23 +16,23 @@ static int OUTPUT_SIZE;
 static float* OUTPUT_ENTRIES;
 
 Lock C_LOCK;
-Lock* C_LOCK_ENTRIES; /* Only used if lock_config == 2 */
-pthread_barrier_t G_CHECKPOINT;
+Lock* C_LOCK_ENTRIES; // L_CONFIG == 2: array of locks per entry 
+int C_LOCK_ENTRIES_SIZE; // L_CONFIG == 2: size of C_LOCK_ENTRIES
 
-atomic_int G_FLAG;
-
-int C_LOCK_ENTRIES_SIZE;
+pthread_barrier_t G_CHECKPOINT; // G_CP == 1: checkpoint
+atomic_int G_FLAG; // G_CP == 1: number of threads that are finished 
+atomic_int A_FLAG; // G_CP == 1: number of threads waiting at the barrier
 
 void* compute_channels(void* t_args) {  
   ThreadArgs* args = (ThreadArgs*) t_args;
   FileData* fd = args->fd;
   ComputeOptions* op = args->op;
-  
+
+  const int thread_count = op->num_threads;
   int file_index_offset = args->offset;
-  int file_count_local = fd->channel_file_size / op->num_threads;
+  int file_count_local = fd->channel_file_size / thread_count;
   int read_sz = op->buffer_size;
   int file_finished_count = 0;
-  int thread_count = op->num_threads;
 
   OpenFiles* open_files_buffer = (OpenFiles*) calloc(file_count_local, sizeof(OpenFiles));
   char* read_buffer = (char*) calloc(read_sz + 1, sizeof(char));
@@ -44,7 +44,7 @@ void* compute_channels(void* t_args) {
 
   /* Open all files */
   for (int j = 0; j < file_count_local; ++j) {
-    int f_index = file_index_offset + (j * op->num_threads);
+    int f_index = file_index_offset + (j * thread_count);
     char* read_path = fd->channel_files[f_index].path;
     
     open_files_buffer[j].file_desc = fopen(read_path, "rb");
@@ -55,13 +55,20 @@ void* compute_channels(void* t_args) {
 
   int _byte = -1;
 
-  for (int i = 0; file_finished_count < file_count_local || G_FLAG != thread_count; i = (i + 1) % file_count_local) {
+  for (int i = 0; G_FLAG <= thread_count; i = (i + 1) % file_count_local) {
     FILE* f = open_files_buffer[i].file_desc;
 
     if (op->global_checkpointing == 1 && i == 0) {
-      printf("Thread #%d is WAITING\n", file_index_offset + 1);
+      //printf("Thread #%d is WAITING\n", file_index_offset + 1);
+      atomic_fetch_add(&A_FLAG, 1);
       pthread_barrier_wait(&G_CHECKPOINT);
-    } 
+    }
+
+    if (G_FLAG == thread_count) { // all threads are done - exit now
+      break;
+    }
+
+    if (op->global_checkpointing) __sync_val_compare_and_swap(&A_FLAG, thread_count, 0);
     
     if (f == NULL) continue; /* Any finished file will be set to NULL */
 
@@ -69,7 +76,8 @@ void* compute_channels(void* t_args) {
     int output_index = output_index_buffer[i];
     int f_index = open_files_buffer[i].fi;
 
-  //         for (int i = 0; i < read_sz; ++i) {
+  //         for (int i = 0; i < \==-098765432
+    // ead_sz; ++i) {
 	// if (read_buffer[i] == '\n') printf("\\n");
 	// else printf("%c", read_buffer[i]);
   //     }
@@ -77,13 +85,16 @@ void* compute_channels(void* t_args) {
 
     if (bytes_read == 0) {
       ++file_finished_count;
-
-      if (file_finished_count == file_count_local) atomic_fetch_add(&G_FLAG, 1);
+      
+      if (file_finished_count == file_count_local) { // finished all files
+	if (G_FLAG == thread_count - 1 && op->global_checkpointing == 1) // last working thread
+	  while (A_FLAG != thread_count - 1); // wait till all other threads at barrier
+	
+	atomic_fetch_add(&G_FLAG, 1);
+      };
       
       fclose(f);
       open_files_buffer[i].file_desc = NULL;
-
-      if (G_FLAG == thread_count) pthread_barrier_wait(&G_CHECKPOINT);
       
       continue;
     }
@@ -125,11 +136,11 @@ void* compute_channels(void* t_args) {
       ++OUTPUT_SIZE;
       ++C_LOCK_ENTRIES_SIZE;
 
-      OUTPUT_ENTRIES = (float*) realloc(OUTPUT_ENTRIES, OUTPUT_SIZE);
+      OUTPUT_ENTRIES = (float*) realloc(OUTPUT_ENTRIES, OUTPUT_SIZE * sizeof(float));
       OUTPUT_ENTRIES[output_index] = 0;
 
       if (op->lock_config == 2) {
-	C_LOCK_ENTRIES = (Lock*) realloc(C_LOCK_ENTRIES, C_LOCK_ENTRIES_SIZE);
+	C_LOCK_ENTRIES = (Lock*) realloc(C_LOCK_ENTRIES, C_LOCK_ENTRIES_SIZE * sizeof(Lock));
 	C_LOCK_ENTRIES[output_index] = 0;
       }
     }
@@ -266,7 +277,9 @@ int main(int argc, char** argv) {
   }
 
   output_content[output_offset] = 0;
-  fputs(output_content, fopen("out.txt", "w+")); /* Dump */
+  FILE* out = fopen("out.txt", "w+");
+  fputs(output_content, out); /* Dump */
+  fclose(out);
   printf("output_content:\n%s\n", output_content);
 
   e_status = EXIT_SUCCESS;
@@ -277,12 +290,12 @@ int main(int argc, char** argv) {
   mem_free(t_args);
   mem_free(t_ids);
 
-  if (op->global_checkpointing == 1) pthread_barrier_destroy(&G_CHECKPOINT);
+  if (op->global_checkpointing == 1 && e_status != EXIT_FAILURE) pthread_barrier_destroy(&G_CHECKPOINT);
   
   mem_free(op);
   mem_free(C_LOCK_ENTRIES);
   mem_free(OUTPUT_ENTRIES);
-
+  
   exit(e_status);
 }
 
@@ -305,7 +318,9 @@ int check_option_validity(const ComputeOptions* op, const FileData* fd) {
   }
 
   if (op->num_threads != 0 &&
-      fd->channel_file_size % op->num_threads != 0) {
+      fd->channel_file_size != 0 &&
+       fd->channel_file_size % op->num_threads != 0
+      ) {
     fprintf(stderr, "Error: invalid ratio of files and threads\n");
     violation_count++;
   }
