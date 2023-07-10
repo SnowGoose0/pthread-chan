@@ -1,17 +1,19 @@
 #ifndef CHANNELS
 #define CHANNELS
 
-#define EXPECTED_ARGC                       0x7
+#define EXPECTED_ARGC                       0x0007
 #define TOK_DELIMITER                       "\n"
 #define WHITESPACE_CHARS                    " \t\n\r\v\f"
 
-#define STATE_FPATH                         0x00
-#define STATE_ALPHA                         0x01
-#define STATE_BETA                          0x02
+#define STATE_FPATH                         0x0000
+#define STATE_ALPHA                         0x0001
+#define STATE_BETA                          0x0002
 
-#define STATE_COUNT                         0x03
+#define STATE_COUNT                         0x0003
 
-#define DEFAULT_OUTPUT_SIZE                 0x01
+#define DEFAULT_OUTPUT_SIZE                 0x0001
+
+#define MAX_16_BIT                          0xFFFF
 
 typedef struct {
   char* path;
@@ -48,7 +50,6 @@ typedef struct{
 float compute_beta(float beta, float sample);
 float compute_alpha(float alpha, float sample, float prev_sample);
 int check_option_validity(const ComputeOptions* op, const FileData* fd);
-char* ftos(char* path);
 int str_clean(char* src);
 void mem_free_metadata(FileData* fd);
 void mem_free(void* ptr);

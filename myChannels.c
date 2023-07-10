@@ -7,7 +7,7 @@
 #include <math.h>
 #include <pthread.h>
 
-#include "pthread_barrier.h"
+// #include "pthread_barrier.h"
 
 #include "myChannels.h"
 #include "lock.h"
@@ -152,7 +152,7 @@ void* compute_channels(void* t_args) {
     
     float cur_entry_val = OUTPUT_ENTRIES[output_index];
     float new_entry_val = cur_entry_val + res;
-    OUTPUT_ENTRIES[output_index] = new_entry_val;
+    OUTPUT_ENTRIES[output_index] = fminf(MAX_16_BIT, new_entry_val);
 
     /* Exit Section */
     Lock* lock_ptr = &C_LOCK;
@@ -165,16 +165,6 @@ void* compute_channels(void* t_args) {
     memset(read_buffer, 0, read_sz + 1);
     ++output_index_buffer[i];
   }
-
-  /*  if (op->global_checkpointing == 1) {
-    atomic_fetch_add(&G_FLAG, 1);
-    pthread_barrier_wait(&G_CHECKPOINT);
-    
-    while (G_FLAG != op->num_threads) {
-      printf("Thread #%d is WAITING\n", file_index_offset + 1);      
-      pthread_barrier_wait(&G_CHECKPOINT);
-    }
-    }*/
 
   printf("Thread #%d is OUT\n", file_index_offset + 1);
 
@@ -213,7 +203,7 @@ int main(int argc, char** argv) {
 
   if (parse_status > 0) {
     fprintf(stderr, ERROR_PARSE_INT_ARG);
-    free(OUTPUT_ENTRIES);
+    mem_free(OUTPUT_ENTRIES);
     exit(EXIT_FAILURE);
   }
  
@@ -243,15 +233,14 @@ int main(int argc, char** argv) {
     goto EXIT;
   }
 
-  int error_count;
-  if ((error_count = check_option_validity(op, fd)) > 0) {
-    fprintf(stderr, "Total number of errors: %d\n", error_count);
+  if ((check_option_validity(op, fd)) > 0) {
     e_status = EXIT_FAILURE;
     goto EXIT;
   }
 
-  for (int i = 0; i < fd->channel_file_size; i++) {
-    if (access(fd->channel_files[i].path, F_OK)) {
+  /* Check if all input files are valid */
+  for (int i = 0; i < fd->channel_file_size; i++) {        
+    if (access(fd->channel_files[i].path, F_OK) < 0) {
       fprintf(stderr, "Error: metadata file contains one or more invalid input file paths\n");
       goto EXIT;
     }
@@ -261,7 +250,6 @@ int main(int argc, char** argv) {
  
   /* Spawn Threads */
   for (int i = 0; i < nt; ++i) {
-    printf("HELLO\n");
     t_args[i].fd = fd;
     t_args[i].op = op;
     t_args[i].offset = i;
@@ -295,21 +283,22 @@ int main(int argc, char** argv) {
   }
 
   output_content[output_offset] = 0;
-  FILE* out = fopen("out.txt", "w+");
+  FILE* out = fopen(ofp, "w+");
   fputs(output_content, out); /* Dump */
   fclose(out);
   printf("output_content:\n%s\n", output_content);
 
   e_status = EXIT_SUCCESS;
   
- EXIT:
+ EXIT: 
   mem_free_metadata(fd);
   mem_free(output_content);
   mem_free(t_args);
   mem_free(t_ids);
   
   if (op != NULL)
-    if (op->global_checkpointing == 1 && e_status != EXIT_FAILURE) pthread_barrier_destroy(&G_CHECKPOINT);
+    if (op->global_checkpointing == 1 && e_status != EXIT_FAILURE)
+      pthread_barrier_destroy(&G_CHECKPOINT);
   
   mem_free(op);
   mem_free(C_LOCK_ENTRIES);
@@ -355,20 +344,6 @@ int check_option_validity(const ComputeOptions* op, const FileData* fd) {
   }
 
   return violation_count;
-}
-
-char* ftos(char* path) {
-  FILE* f = fopen(path, "rb");
-  fseek(f, 0, SEEK_END);
-  long fsz = ftell(f);
-  rewind(f);
-
-  char* f_buffer = (char*) calloc(fsz + 1, sizeof(char));
-  fread(f_buffer, sizeof(char), fsz, f);
-
-  fclose(f);
-  
-  return f_buffer;
 }
 
 float compute_beta(float beta, float sample) {

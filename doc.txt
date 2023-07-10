@@ -4,7 +4,23 @@ This document will attempt the explain the design choices for this program.
 
 <Program Assumptions>
 
-	- The provided text files will not consist any unexpected signatures or '/r' characters
+	(Any deviations from these expectations may cause unexpected results)
+
+	- The provided text files will not consist any unexpected signatures or the '/r' character
+
+	- The values in the metadata files are correctly formatted:
+	  - The number of files given at the start should reflect the number of file paths given
+	  - No extra white spaces (space and lines)
+	  - There are exactly 0, 1 or 2 floating point numbers following a file path
+	    - 0 : both alpha and beta are assumed to be default (1.0)
+	    - 1 : alpha is taken as the value and beta is assumed to be default
+	    - 2 : both alpha and beta take on its respective values
+
+	- The values in the input files are correctly formatted:
+	  - No extra white spaces (space and lines)
+	  - Exactly 1 value per line
+	  - Each value valid 16 bit integer
+	  
 	- The following actions will result in an error message and the program's termination:
 	  - Too few arguments
 	  - Too many arguments
@@ -50,7 +66,15 @@ A shared array of floats that stores each entry of the output file. The output o
 output_size:
 Number of entries in total. The value is expected to grow if any thread attempts to index into output_entries where the index is greater or equal to output_size.
 
-The variables output_entries is initialized to a pointer to an array of floats of size 1. Correspondingly, output_size is initialized to the value of 1. Since the number of entries is unknown prior to calculations, the size of output_entries will grow as needed: when a thread attempts to index a location beyond its current size (index >= output_size). 
+The variables output_entries is initialized to a pointer to an array of floats of size 1. Correspondingly, output_size is initialized to the value of 1. Since the number of entries is unknown prior to calculations, the size of output_entries will grow as needed: when a thread attempts to index a location beyond its current size (index >= output_size).
+
+====================================================================================================
+
+<Calculation>
+
+Calculation only takes place in the critical section. Values are read (from output_entries), computed (with values from input channel), and written (back to output_entries).
+
+The final output that is written will be the minimum value between 65525 and the computed value. This ensures that there will never be overflow.
 
 ====================================================================================================
 
@@ -103,6 +127,8 @@ If a thread T finishes processing its files before other threads, T will still c
 
 G_FLAG is a variable used to track the number of threads who are done processing (non-working threads). When the value of G_FLAG equals the number of threads, all threads will exit the barrier loop and terminate. Suppose the last working thread just finished and updated the value of G_FLAG (now the exiting condition is satisfied), there may be some non-working thread that could potentially be exit early as it has not reached the next barrier yet, which will leave the threads at the barrier hang. Thus, A_FLAG is a variable that is used to track the number of threads who reached the barrier, so that the last working thread will ONLY update G_FLAG once it knows all other threads are waiting at the barrier. Hence, no race condition on G_FLAG and uniform exits.
 
+Note: Modification of values for both G_FLAG and A_FLAG are done atomically using provided functions from <stdatomic.h>.
+
 Ex. Exiting early
 
 time=0	  [Last Working T]			[Non Working T]
@@ -122,3 +148,8 @@ We want the non working T to reach the Next Barrier before the last working T to
 Output:
 
 Once all thread computations are finished, the values in output_entries are rounded, parsed, and formatted into a buffer which is then dumped into the provided path for the output .txt file.
+
+Each output value is separated by a line (with '\n) in the output file
+
+
+valgrind --leak-check=full --show-leak-kinds=all --fair-sched=yes ./myChannel 3 2 meta.txt 1 1 my_out.txt

@@ -1,0 +1,8 @@
+{
+    "files.associations": {
+        "parse.h": "c",
+        "lock.h": "c",
+        "mychannels.h": "c",
+        "pthread.h": "c"
+    }
+}
