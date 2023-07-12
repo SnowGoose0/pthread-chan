@@ -1,0 +1,53 @@
+==243770== Memcheck, a memory error detector
+==243770== Copyright (C) 2002-2022, and GNU GPL'd, by Julian Seward et al.
+==243770== Using Valgrind-3.20.0 and LibVEX; rerun with -h for copyright info
+==243770== Command: ./myChannels 3 2 meta/meta16.txt 2 0 output.txt
+==243770== Parent PID: 243769
+==243770== 
+==243770== 
+==243770== Process terminating with default action of signal 2 (SIGINT)
+==243770==    at 0x512A6E9: open (open64.c:41)
+==243770==    by 0x50A2135: _IO_file_open (fileops.c:188)
+==243770==    by 0x50A2491: _IO_file_fopen@@GLIBC_2.2.5 (fileops.c:280)
+==243770==    by 0x509572D: __fopen_internal (iofopen.c:75)
+==243770==    by 0x509572D: fopen@@GLIBC_2.2.5 (iofopen.c:86)
+==243770==    by 0x10A964: parse_metadata (parse.c:40)
+==243770==    by 0x10A00A: main (myChannels.c:235)
+==243770== 
+==243770== HEAP SUMMARY:
+==243770==     in use at exit: 525 bytes in 5 blocks
+==243770==   total heap usage: 5 allocs, 0 frees, 525 bytes allocated
+==243770== 
+==243770== 1 bytes in 1 blocks are still reachable in loss record 1 of 5
+==243770==    at 0x4E09C7D: calloc (vg_replace_malloc.c:1340)
+==243770==    by 0x109FFA: main (myChannels.c:232)
+==243770== 
+==243770== 4 bytes in 1 blocks are still reachable in loss record 2 of 5
+==243770==    at 0x4E09C7D: calloc (vg_replace_malloc.c:1340)
+==243770==    by 0x109E3C: main (myChannels.c:192)
+==243770== 
+==243770== 16 bytes in 1 blocks are still reachable in loss record 3 of 5
+==243770==    at 0x4E050C5: malloc (vg_replace_malloc.c:393)
+==243770==    by 0x10A94A: parse_metadata (parse.c:39)
+==243770==    by 0x10A00A: main (myChannels.c:235)
+==243770== 
+==243770== 32 bytes in 1 blocks are still reachable in loss record 4 of 5
+==243770==    at 0x4E050C5: malloc (vg_replace_malloc.c:393)
+==243770==    by 0x109F9F: main (myChannels.c:223)
+==243770== 
+==243770== 472 bytes in 1 blocks are still reachable in loss record 5 of 5
+==243770==    at 0x4E050C5: malloc (vg_replace_malloc.c:393)
+==243770==    by 0x50956CD: __fopen_internal (iofopen.c:65)
+==243770==    by 0x50956CD: fopen@@GLIBC_2.2.5 (iofopen.c:86)
+==243770==    by 0x10A964: parse_metadata (parse.c:40)
+==243770==    by 0x10A00A: main (myChannels.c:235)
+==243770== 
+==243770== LEAK SUMMARY:
+==243770==    definitely lost: 0 bytes in 0 blocks
+==243770==    indirectly lost: 0 bytes in 0 blocks
+==243770==      possibly lost: 0 bytes in 0 blocks
+==243770==    still reachable: 525 bytes in 5 blocks
+==243770==         suppressed: 0 bytes in 0 blocks
+==243770== 
+==243770== For lists of detected and suppressed errors, rerun with: -s
+==243770== ERROR SUMMARY: 0 errors from 0 contexts (suppressed: 0 from 0)

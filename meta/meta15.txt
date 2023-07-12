@@ -1,0 +1,7 @@
+2
+input/input1.txt
+0.33
+1
+input/input2.txt
+0.1
+0.5

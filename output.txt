@@ -1,45 +1,8 @@
-file_count_local: 2
-Thread#1 - Iteration 0 - Res 23.000000
-file_count_local: 2
-Thread#1 - Iteration 0 - Res 23.000000
-Thread#1 - Iteration 1 - Res 32.000000
-Thread#1 - Iteration 1 - Res 28.400002
-Thread#2 - Iteration 0 - Res 65.000000
-Thread#1 - Iteration 2 - Res 16.000000
-Thread#1 - Iteration 2 - Res 19.880001
-Thread#2 - Iteration 0 - Res 39.000000
-Thread#2 - Iteration 1 - Res 35.500000
-Thread#2 - Iteration 1 - Res 21.300001
-Thread#2 - Iteration 2 - Res 31.750000
-Thread#2 - Iteration 2 - Res 19.050001
-Thread#2 - Iteration 3 - Res 50.125000
-Thread#2 - Iteration 3 - Res 30.075001
-bsize: 3
-threads: 2
-meta: meta.txt
-lock: 2
-check: 0
-out: out.txt
-
-File: /home/jason/Desktop/cmpt300/cmpt300-a3/input1.txt
-Alpha: 0.500000
-Beta: 1.000000
-
-File: /home/jason/Desktop/cmpt300/cmpt300-a3/input2.txt
-Alpha: 0.500000
-Beta: 0.500000
-
-File: /home/jason/Desktop/cmpt300/cmpt300-a3/input3.txt
-Alpha: 0.300000
-Beta: 1.000000
-
-File: /home/jason/Desktop/cmpt300/cmpt300-a3/input4.txt
-Alpha: 0.500000
-Beta: 0.300000
-
-output_content:
-150
-118
-87
-81
-
+11347
+4482
+7789
+4199
+2347
+4194
+6430
+3215

@@ -19,13 +19,12 @@ static float* OUTPUT_ENTRIES;
 
 Lock C_LOCK;
 Lock* C_LOCK_ENTRIES; // L_CONFIG == 2: array of locks per entry 
-int C_LOCK_ENTRIES_SIZE; // L_CONFIG == 2: size of C_LOCK_ENTRIES
 
 pthread_barrier_t G_CHECKPOINT; // G_CP == 1: checkpoint
 atomic_int G_FLAG; // G_CP == 1: number of threads that are finished 
 atomic_int A_FLAG; // G_CP == 1: number of threads waiting at the barrier
 
-void* compute_channels(void* t_args) {  
+void* compute_channels(void* t_args) {
   ThreadArgs* args = (ThreadArgs*) t_args;
   FileData* fd = args->fd;
   ComputeOptions* op = args->op;
@@ -56,21 +55,26 @@ void* compute_channels(void* t_args) {
   printf("file_count_local: %d\n", file_count_local);
 
   int _byte = -1;
+  int it = -1;
 
   for (int i = 0; G_FLAG <= thread_count; i = (i + 1) % file_count_local) {
+    it++;
+    if (i == 0) _byte++;
+    
     FILE* f = open_files_buffer[i].file_desc;
 
     if (op->global_checkpointing == 1 && i == 0) {
-      //printf("Thread #%d is WAITING\n", file_index_offset + 1);
       atomic_fetch_add(&A_FLAG, 1);
       pthread_barrier_wait(&G_CHECKPOINT);
+      printf("Thread #%d is ARRIVED! IT: %d\n", file_index_offset + 1, it);
     }
 
-    if (G_FLAG == thread_count) { // all threads are done - exit now
+    if (G_FLAG == thread_count && i == 0) { // all threads are done - exit now
       break;
     }
 
-    if (op->global_checkpointing) __sync_val_compare_and_swap((int*) &A_FLAG, thread_count, 0);
+    if (op->global_checkpointing)
+      __sync_val_compare_and_swap(&A_FLAG, thread_count, 0);
     
     if (f == NULL) continue; /* Any finished file will be set to NULL */
 
@@ -78,26 +82,20 @@ void* compute_channels(void* t_args) {
     int output_index = output_index_buffer[i];
     int f_index = open_files_buffer[i].fi;
 
-  //         for (int i = 0; i < \==-098765432
-    // ead_sz; ++i) {
-	// if (read_buffer[i] == '\n') printf("\\n");
-	// else printf("%c", read_buffer[i]);
-  //     }
-  //     printf("\n");
-
     if (bytes_read == 0) {
       ++file_finished_count;
       
       if (file_finished_count == file_count_local) { // finished all files
-	if (G_FLAG == thread_count - 1 && op->global_checkpointing == 1) // last working thread
+
+	if (G_FLAG == thread_count - 1 && op->global_checkpointing == 1) { // last working thread
 	  while (A_FLAG != thread_count - 1); // wait till all other threads at barrier
+	}
 	
 	atomic_fetch_add(&G_FLAG, 1);
       };
       
       fclose(f);
       open_files_buffer[i].file_desc = NULL;
-      
       continue;
     }
     
@@ -108,20 +106,29 @@ void* compute_channels(void* t_args) {
     ps_err = parse_int(&parsed, read_buffer);
 
     if (ps_err) {
-      printf("PS ERR");
-      continue;
+      printf("PARSING ERROR: [%s]\n", read_buffer);
+      if (*read_buffer == 0) {
+	printf("ITS JUST LINE FEED\n");
+	parsed = 0;
+      } else {
+	memset(read_buffer, 0, read_sz + 1);
+	continue;
+      }
     }
       
     alpha_res = compute_alpha(fd->channel_files[f_index].alpha, parsed, prev_buffer[i]);
     prev_buffer[i] = alpha_res;
     res = compute_beta(fd->channel_files[f_index].beta, alpha_res);
 
-    /* Entry Section */
-
-    if (i == 0) _byte++;
-    
+    /* Entry Section */    
     if (op->lock_config == 1) {
-      while(__sync_lock_test_and_set(&C_LOCK, 1));
+      while(__sync_lock_test_and_set(&C_LOCK, 1)) {
+	printf("Thread%d waiting for lock\n", file_index_offset + 1);
+	while(C_LOCK) {
+	  __sync_synchronize();
+	}
+      }
+          printf("Thread%d in critical section of index %d\n", file_index_offset + 1, output_index);
     }
 
     else if (op->lock_config == 2) {
@@ -129,25 +136,20 @@ void* compute_channels(void* t_args) {
     }
 
     else if (op->lock_config == 3) {
-      while(__sync_val_compare_and_swap(&C_LOCK, 0, 1));
+      while(__sync_val_compare_and_swap(&C_LOCK, 0, 1)){};
+                printf("Thread%d in critical section of index %d\n", file_index_offset + 1, output_index);
+		//		sleep(2);
     }
-
     /* Critical Section */
-    printf("Thread#%d - File # %d - Byte: k + %d\n", file_index_offset + 1, i, _byte);
+    //    printf("Thread#%d - File # %d - Byte: k + %d - Val: %d\n", file_index_offset + 1, i, _byte, parsed);
 
     //float cur_entry_val = OUTPUT_ENTRIES[output_index];
     
     if (output_index >= OUTPUT_SIZE) {
       ++OUTPUT_SIZE;
-      ++C_LOCK_ENTRIES_SIZE;
 
-      OUTPUT_ENTRIES = (float*) realloc(OUTPUT_ENTRIES, OUTPUT_SIZE * sizeof(float));
-      OUTPUT_ENTRIES[output_index] = 0;
-
-      if (op->lock_config == 2) {
-	C_LOCK_ENTRIES = (Lock*) realloc(C_LOCK_ENTRIES, C_LOCK_ENTRIES_SIZE * sizeof(Lock));
-	C_LOCK_ENTRIES[output_index] = 0;
-      }
+      /* OUTPUT_ENTRIES = (float*) realloc(OUTPUT_ENTRIES, OUTPUT_SIZE * sizeof(float)); */
+      /* OUTPUT_ENTRIES[output_index] = 0; */
     }
     
     float cur_entry_val = OUTPUT_ENTRIES[output_index];
@@ -155,15 +157,15 @@ void* compute_channels(void* t_args) {
     OUTPUT_ENTRIES[output_index] = fminf(MAX_16_BIT, new_entry_val);
 
     /* Exit Section */
-    Lock* lock_ptr = &C_LOCK;
-
-    if (op->lock_config == 2) lock_ptr = &C_LOCK_ENTRIES[output_index];
-      
-    __sync_lock_release(lock_ptr);
-
+    printf("Thread%d out of critical section of index %d\n", file_index_offset + 1, output_index);
+    if (op->lock_config == 2) {
+      __sync_lock_release(&C_LOCK_ENTRIES[output_index]);
+    } else {
+      __sync_lock_release(&C_LOCK);
+    }
     /* Remainder Section */
     memset(read_buffer, 0, read_sz + 1);
-    ++output_index_buffer[i];
+    output_index_buffer[i] = output_index_buffer[i] + 1;
   }
 
   printf("Thread #%d is OUT\n", file_index_offset + 1);
@@ -178,20 +180,19 @@ void* compute_channels(void* t_args) {
 
 int main(int argc, char** argv) {
   int e_status;
+
+  FileData* fd = NULL;
+  char* output_content = NULL;
+  ThreadArgs* t_args = NULL;
+  pthread_t* t_ids = NULL;
+  ComputeOptions* op = NULL;
+  Lock* C_LOCK_ENTRIES = NULL;
+  float* OUTPUT_ENTRIES = NULL;
   
   if (argc != EXPECTED_ARGC) {
     fprintf(stderr, ERROR_ARGC);
     exit(EXIT_FAILURE);
   }
-
-  OUTPUT_SIZE = 1;
-  OUTPUT_ENTRIES = (float*) calloc(OUTPUT_SIZE, sizeof(float));
-  C_LOCK_ENTRIES = NULL;
-  C_LOCK_ENTRIES_SIZE = 1; 
-  C_LOCK = 0;
-
-  //G_FLAG = 0;
-  atomic_store(&G_FLAG, 0);
 
   int parse_status, bs, nt, lc, gcp;
 
@@ -210,9 +211,9 @@ int main(int argc, char** argv) {
   char* mfp = *(argv + 3);
   char* ofp = *(argv + 6);
 
-  if (lc == 2) C_LOCK_ENTRIES = (Lock*) calloc(1, sizeof(Lock));
+  //if (lc == 2) C_LOCK_ENTRIES = (Lock*) calloc(1, sizeof(Lock));
   
-  ComputeOptions* op = (ComputeOptions*) malloc(sizeof(ComputeOptions));
+  op = (ComputeOptions*) malloc(sizeof(ComputeOptions));
   
   op->buffer_size = bs;
   op->num_threads = nt;
@@ -221,12 +222,12 @@ int main(int argc, char** argv) {
   op->metadata_file_path = mfp;
   op->output_file_path = ofp;
   
-  char* output_content = (char*) calloc(1, sizeof(char));
+  output_content = (char*) calloc(1, sizeof(char));
 
   /* Parse MetaData + Validate Parameters */
-  FileData* fd = parse_metadata(mfp);
-  ThreadArgs* t_args = (ThreadArgs*) malloc(sizeof(ThreadArgs) * nt);
-  pthread_t* t_ids = (pthread_t*) malloc(sizeof(pthread_t) * nt);
+  fd = parse_metadata(mfp);
+  t_args = (ThreadArgs*) malloc(sizeof(ThreadArgs) * nt);
+  t_ids = (pthread_t*) malloc(sizeof(pthread_t) * nt);
 
   if (fd == NULL) {
     e_status = EXIT_FAILURE;
@@ -238,13 +239,29 @@ int main(int argc, char** argv) {
     goto EXIT;
   }
 
+  int max_file_size = 0;
+
   /* Check if all input files are valid */
   for (int i = 0; i < fd->channel_file_size; i++) {        
     if (access(fd->channel_files[i].path, F_OK) < 0) {
       fprintf(stderr, "Error: metadata file contains one or more invalid input file paths\n");
       goto EXIT;
     }
+
+    FILE* tmp_f = fopen(fd->channel_files[i].path, "rb");
+    fseek(tmp_f, 0, SEEK_END);
+    max_file_size = fmax(ftell(tmp_f), max_file_size);
+    fclose(tmp_f);
   }
+
+  OUTPUT_SIZE = 1;
+  OUTPUT_ENTRIES = (float*) calloc(max_file_size, sizeof(float));
+  C_LOCK_ENTRIES = (Lock*) calloc(max_file_size, sizeof(Lock));
+  
+  C_LOCK = 0;
+
+  //G_FLAG = 0;
+  atomic_store(&G_FLAG, 0);
 
   if (gcp == 1) pthread_barrier_init(&G_CHECKPOINT, NULL, nt);
  
@@ -290,7 +307,7 @@ int main(int argc, char** argv) {
 
   e_status = EXIT_SUCCESS;
   
- EXIT: 
+ EXIT:
   mem_free_metadata(fd);
   mem_free(output_content);
   mem_free(t_args);
@@ -380,6 +397,9 @@ int str_clean(char* src) {
 
 void mem_free_metadata(FileData* fd) {
   int f = 0;
+
+  if (fd == NULL) return;
+  
   for (; f < fd->channel_file_size; ++f) {
     mem_free(fd->channel_files[f].path);
   }

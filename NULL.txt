@@ -1,0 +1,30 @@
+Thread#1 - Iteration 0
+Thread#1 - Iteration 1
+Thread#1 - Iteration 2
+Thread#1 - Iteration 3
+PARSING ERROR
+Thread#1 - Iteration 0
+Thread#1 - Iteration 1
+Thread#1 - Iteration 2
+Thread#1 - Iteration 3
+bsize: 5
+threads: 2
+meta: meta/meta2.txt
+lock: 3
+check: 1
+out: sample.txt
+
+File: input/input9.txt
+Alpha: 1.000000
+Beta: 1.000000
+
+File: input/input8.txt
+Alpha: 1.000000
+Beta: 1.000000
+
+output_content:
+4768
+4858
+844
+103
+

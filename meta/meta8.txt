@@ -1,0 +1,13 @@
+4
+input/input1.txt
+0.2
+1
+input/input2.txt
+0.1
+0.5
+input/input3.txt
+0.3
+0.432
+input/input4.txt
+0.51
+0.32

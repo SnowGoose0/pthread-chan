@@ -3,7 +3,7 @@
 
 #include <stdbool.h>
 
-typedef int Lock;
+typedef volatile int Lock;
 
 void lock(Lock* c_lock);
 

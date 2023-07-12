@@ -5,13 +5,13 @@ LDFLAGS = -pthread -lm
 SRCS = myChannels.c parse.c lock.c
 OBJS = $(SRCS:.c=.o)
 
-all: myChannel
+all: myChannels
 
-myChannel: $(OBJS)
+myChannels: $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 clean:
-	rm -f $(OBJS) myChannel
+	rm -f $(OBJS) myChannels

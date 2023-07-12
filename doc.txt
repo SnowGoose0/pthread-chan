@@ -61,12 +61,9 @@ More details about file reading per thread will be discussed in the checkpointin
 There exists two main variables that are shared to be written to among all threads: output_entries, output_size
 
 output_entries:
-A shared array of floats that stores each entry of the output file. The output of entry computed by a thread (per read iteration) will be stored here by indexing into the array and incrementing the previous value at that location.
+A shared array of floats that stores each entry of the output file. The output of entry computed by a thread (per read iteration) will be stored here by indexing into the array and incrementing the previous value at that location. This data structure is static and has a fixed size.
 
-output_size:
-Number of entries in total. The value is expected to grow if any thread attempts to index into output_entries where the index is greater or equal to output_size.
-
-The variables output_entries is initialized to a pointer to an array of floats of size 1. Correspondingly, output_size is initialized to the value of 1. Since the number of entries is unknown prior to calculations, the size of output_entries will grow as needed: when a thread attempts to index a location beyond its current size (index >= output_size).
+The original designed was to let the array grow as needed. However, this can cause synchronization problems when lock configuration = 2 where a thread can be resizing while another thread is writing. A potential solution is to put another lock onto the structure but that would defeat the purpose of having a lock on each entry to begin with.
 
 ====================================================================================================
 

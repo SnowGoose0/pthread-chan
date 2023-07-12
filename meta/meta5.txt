@@ -1,0 +1,6 @@
+2
+input/input10.txt
+0.5
+input/input1.txt
+0.5
+0.3
