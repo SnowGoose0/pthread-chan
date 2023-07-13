@@ -15,7 +15,7 @@ const char* singleThreadChannel = "./mySingleChannels %d %d %s %d %d sample.txt 
 
 const char* memCheck = "valgrind --log-file=log.txt --fair-sched=yes ./myChannels %d %d %s %d %d output.txt > /dev/null";
 
-char meta_files[20][20] = {
+char meta_files[21][20] = {
   "meta/meta1.txt",
   "meta/meta2.txt",
   "meta/meta3.txt",
@@ -35,7 +35,8 @@ char meta_files[20][20] = {
   "meta/meta17.txt",
   "meta/meta18.txt",
   "meta/meta19.txt",
-  "meta/meta20.txt"
+  "meta/meta20.txt",
+  "meta/smeta3.txt"
 };
 
 void mem_clear(char* arr, int length) {
@@ -91,7 +92,7 @@ int compareFiles(const char* file1, const char* file2) {
 #define ANSI_COLOR_RESET   "\x1b[0m"
 #define ANSI_COLOR_BLUE_BOLD "\x1b[1;34m"
 
-int main() {
+int main(int argc, char** argv) {
     int n = 100000; // Number of times to execute myChannel
     int test_counter = 0;
     int counter = 0; // Counter for differences
@@ -102,7 +103,27 @@ int main() {
     char line1[MAX_LINE_LENGTH];
     char line2[MAX_LINE_LENGTH];
 
-    for (int i = 1; i < META_LENGTH; i++) {
+    int memcheck = 0;
+    int edge = 1;
+
+    if (argc > 1) {
+      char op;
+      int i = 1;
+
+      while (i != argc) {
+	op = argv[i][0];
+	
+	if (op == 'm') {
+	  memcheck = 1;
+	} else if (op == 'e') {
+	  edge = 1;	  
+	}
+	
+	++i;
+      }
+    }
+
+    for (int i = 0; i < META_LENGTH + 1; i++) {
       char* meta_path = meta_files[i];
 
       for (int bytes = 1; bytes <= 5; bytes++) {
@@ -129,27 +150,30 @@ int main() {
 		system("cat sample.txt > error_s.txt");
 	      }
 
+	      if (memcheck) {
+		sprintf(c_command, memCheck,
+			bytes, threads, meta_path, lock, check);
+		system(c_command);
 
-	      /* sprintf(c_command, memCheck, */
-	      /* 	      bytes, threads, meta_path, lock, check); */
-	      /* system(c_command); */
+		if (!isStringInFile("log.txt", "All heap blocks were freed -- no leaks are possible")) {
+		  printf("%s LEAK DETECTED %s\n", ANSI_COLOR_RED, ANSI_COLOR_RESET);
+		  mem_counter++;
+		} else {
+		  printf("%s MEM OK! %s\n", ANSI_COLOR_GREEN, ANSI_COLOR_RESET);
+		}
 
-	      /* if (!isStringInFile("log.txt", "All heap blocks were freed -- no leaks are possible")) { */
-	      /* 	printf("%s LEAK DETECTED %s\n", ANSI_COLOR_RED, ANSI_COLOR_RESET); */
-	      /* 	mem_counter++; */
-	      /* } else { */
-	      /* 	printf("%s MEM OK! %s\n", ANSI_COLOR_GREEN, ANSI_COLOR_RESET); */
-	      /* } */
+		fflush(stdout);
 
-	      fflush(stdout);
-
-	      mem_clear(c_command, MAX_COMMAND_LENGTH);
-	      mem_clear(command, MAX_COMMAND_LENGTH);
+		mem_clear(c_command, MAX_COMMAND_LENGTH);
+		mem_clear(command, MAX_COMMAND_LENGTH);
+	      }
 	    }
 	  }
 	}
       }
     }
+
+    
 
     printf("Total Failed Cases: %d/%d\n", counter, test_counter);
     printf("Total Mem Leaks: %d\n", mem_counter);

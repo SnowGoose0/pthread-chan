@@ -13,11 +13,11 @@
 #include "lock.h"
 #include "parse.h"
 
-//static float* output_entries;
-static int OUTPUT_SIZE;
-static float* OUTPUT_ENTRIES;
+int OUTPUT_SIZE;
+float* OUTPUT_ENTRIES;
 
 Lock C_LOCK;
+Lock SIZE_LOCK;
 Lock* C_LOCK_ENTRIES; // L_CONFIG == 2: array of locks per entry 
 
 pthread_barrier_t G_CHECKPOINT; // G_CP == 1: checkpoint
@@ -107,6 +107,8 @@ void* compute_channels(void* t_args) {
 
     if (ps_err) {
       printf("PARSING ERROR: [%s]\n", read_buffer);
+      memset(read_buffer, 0, read_sz + 1);
+      continue;
       if (*read_buffer == 0) {
 	printf("ITS JUST LINE FEED\n");
 	parsed = 0;
@@ -141,16 +143,17 @@ void* compute_channels(void* t_args) {
 		//		sleep(2);
     }
     /* Critical Section */
-    //    printf("Thread#%d - File # %d - Byte: k + %d - Val: %d\n", file_index_offset + 1, i, _byte, parsed);
+    printf("Thread#%d - File # %d - Byte: k + %d - Val: %d\n", file_index_offset + 1, i, _byte, parsed);
 
     //float cur_entry_val = OUTPUT_ENTRIES[output_index];
-    
-    if (output_index >= OUTPUT_SIZE) {
-      ++OUTPUT_SIZE;
 
-      /* OUTPUT_ENTRIES = (float*) realloc(OUTPUT_ENTRIES, OUTPUT_SIZE * sizeof(float)); */
-      /* OUTPUT_ENTRIES[output_index] = 0; */
+    while(__sync_lock_test_and_set(&SIZE_LOCK, 1));
+    
+    if (output_index > OUTPUT_SIZE) {
+      ++OUTPUT_SIZE;
     }
+
+    __sync_lock_release(&SIZE_LOCK);
     
     float cur_entry_val = OUTPUT_ENTRIES[output_index];
     float new_entry_val = cur_entry_val + res;
@@ -186,8 +189,8 @@ int main(int argc, char** argv) {
   ThreadArgs* t_args = NULL;
   pthread_t* t_ids = NULL;
   ComputeOptions* op = NULL;
-  Lock* C_LOCK_ENTRIES = NULL;
-  float* OUTPUT_ENTRIES = NULL;
+  C_LOCK_ENTRIES = NULL;
+  OUTPUT_ENTRIES = NULL;
   
   if (argc != EXPECTED_ARGC) {
     fprintf(stderr, ERROR_ARGC);
@@ -254,11 +257,12 @@ int main(int argc, char** argv) {
     fclose(tmp_f);
   }
 
-  OUTPUT_SIZE = 1;
+  OUTPUT_SIZE = 0;
   OUTPUT_ENTRIES = (float*) calloc(max_file_size, sizeof(float));
   C_LOCK_ENTRIES = (Lock*) calloc(max_file_size, sizeof(Lock));
   
   C_LOCK = 0;
+  SIZE_LOCK = 0;
 
   //G_FLAG = 0;
   atomic_store(&G_FLAG, 0);
@@ -288,7 +292,7 @@ int main(int argc, char** argv) {
   /* Format Output */
   int output_offset = 0;
   
-  for (int out_i = 0; out_i < OUTPUT_SIZE; ++out_i) {
+  for (int out_i = 0; out_i <= OUTPUT_SIZE; ++out_i) {
     int out_entry = (int) ceil(OUTPUT_ENTRIES[out_i]);
     int out_entry_len = parse_int_digit(out_entry);
 
@@ -318,7 +322,7 @@ int main(int argc, char** argv) {
       pthread_barrier_destroy(&G_CHECKPOINT);
   
   mem_free(op);
-  mem_free(C_LOCK_ENTRIES);
+  mem_free((void*) C_LOCK_ENTRIES);
   mem_free(OUTPUT_ENTRIES);
   
   exit(e_status);
@@ -414,3 +418,4 @@ void mem_free(void* ptr) {
     ptr = NULL;
   }
 }
+
